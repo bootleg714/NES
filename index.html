@@ -409,17 +409,31 @@
     }
     setInterval(updatePlayers, 1000);
 
-    // Snapshots of the game (~1 MB) are gzipped before sending.
+    // ---- Sending game snapshots ----
+    // A snapshot is ~1 MB of JSON. It's gzipped, turned into plain text (base64), and sent in
+    // small pieces, so no single message is big enough to need PeerJS's own splitting.
+    var PIECE = 12000;
     function gzip(str) {
       if (!window.CompressionStream) return Promise.resolve(null);
       var stream = new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"));
       return new Response(stream).arrayBuffer();
     }
-    function gunzip(buf) {
-      var stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    function gunzip(bytes) {
+      var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
       return new Response(stream).text();
     }
+    function toBase64(bytes) {
+      var s = "";
+      for (var i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(s);
+    }
+    function fromBase64(b64) {
+      var s = atob(b64), out = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+      return out;
+    }
     // Messages to one connection go out strictly in order, even when one needs zipping first.
+    var bigId = 0;
     function makeSender(conn) {
       var queue = Promise.resolve();
       return function (m) {
@@ -428,36 +442,51 @@
           if (m.s === undefined) { conn.send(m); return; }
           var rest = {}, json = JSON.stringify(m.s);
           for (var k in m) if (k !== "s") rest[k] = m[k];
-          rest.big = 1;
           return gzip(json).then(function (z) {
-            if (z) rest.z = z; else rest.j = json;
-            if (conn.open) conn.send(rest);
+            if (!conn.open) return;
+            var text = z ? "g" + toBase64(new Uint8Array(z)) : "j" + json;
+            var id = ++bigId, n = Math.ceil(text.length / PIECE);
+            for (var i = 0; i < n; i++) conn.send({ t: "part", id: id, i: i, n: n, d: text.slice(i * PIECE, (i + 1) * PIECE) });
+            rest.big = id;
+            conn.send(rest);
           });
         }).catch(function (e) { console.error(e); });
       };
     }
-    // Guest: process the host's messages strictly in order, unzipping where needed.
-    var inbox = Promise.resolve();
+
+    // Guest: process the host's messages strictly in order, reassembling snapshots.
+    var inbox = Promise.resolve(), pieces = {}, welcomed = false;
     function onHostData(m) {
       inbox = inbox.then(function () {
         if (!m || typeof m !== "object") return;
         if (m.t === "full") { leaveRoom("That room is full (" + MAX_PLAYERS + " players)."); return; }
+        if (m.t === "part") {
+          (pieces[m.id] = pieces[m.id] || [])[m.i] = m.d;
+          if (!welcomed) setOnline("Getting the game from the host… " + Math.round(100 * (m.i + 1) / m.n) + "%");
+          return;
+        }
         var ready = Promise.resolve(m);
         if (m.big) {
-          ready = (m.z ? gunzip(m.z) : Promise.resolve(m.j)).then(function (txt) {
-            m.s = JSON.parse(txt); delete m.z; delete m.j; return m;
-          });
+          var text = (pieces[m.big] || []).join("");
+          delete pieces[m.big];
+          ready = (text[0] === "g" ? gunzip(fromBase64(text.slice(1))) : Promise.resolve(text.slice(1)))
+            .then(function (json) { m.s = JSON.parse(json); delete m.big; return m; });
         }
         return ready.then(function (msg) {
           if (!net) return;
           net.onMessage(msg);
           if (msg.t === "w") {
+            welcomed = true;
+            clearTimeout(joinTimer);
             setMatchMode(true);
             setOnline("Connected! You're Player " + msg.p + ".", true);
             updatePlayers();
           }
         });
-      }).catch(function (e) { console.error(e); });
+      }).catch(function (e) {
+        console.error(e);
+        if (!welcomed) leaveRoom("Couldn't load the game from the host (" + (e && e.message || e) + "). Try joining again.");
+      });
     }
 
     function makeNet(isHost) {
@@ -506,8 +535,22 @@
         setOnline("Room open. Send friends the invite link or the code. They can join anytime.");
       });
       peer.on("connection", function (c) {
-        var seat = 0;
+        var seat = 0, helloTimer = null, syncTimer = null;
         c.on("open", function () {
+          // Wait for the newcomer to say they're ready before seating them or sending anything.
+          helloTimer = setTimeout(function () { if (!seat) c.close(); }, 15000);
+        });
+        c.on("data", function (m) {
+          if (!seat) {
+            if (m && m.t === "hello") { clearTimeout(helloTimer); seatGuest(); }
+            return;
+          }
+          var g = guests.get(seat);
+          if (!net || !g || g.conn !== c) return;
+          if (m && m.t === "i") g.synced = true;
+          net.onMessage(m, seat);
+        });
+        function seatGuest() {
           if (!net) { net = makeNet(true); net.begin(); setMatchMode(true); }
           seat = net.freeSeat();
           if (!seat) {
@@ -515,23 +558,39 @@
             setTimeout(function () { c.close(); }, 500);
             return;
           }
-          guests.set(seat, { conn: c, send: makeSender(c) });
+          var g = { conn: c, send: makeSender(c), synced: false };
+          guests.set(seat, g);
           net.admit(seat);
-          setOnline("Player " + seat + " joined! You're Player 1.", true);
+          setOnline("Player " + seat + " is joining…");
           updatePlayers();
-        });
-        c.on("data", function (m) {
-          var g = guests.get(seat);
-          if (net && g && g.conn === c) net.onMessage(m, seat);
-        });
-        c.on("close", function () {
+          // If they haven't started playing within 20 s, drop them so the game doesn't stay frozen.
+          syncTimer = setTimeout(function () {
+            if (guests.get(seat) === g && !g.synced) {
+              dropGuest("Player " + seat + " couldn't load the game in time and was dropped.");
+            }
+          }, 20000);
+          var watch = setInterval(function () {
+            if (guests.get(seat) !== g) { clearInterval(watch); return; }
+            if (g.synced) { clearInterval(watch); setOnline("Player " + seat + " joined! You're Player 1.", true); }
+          }, 200);
+        }
+        function dropGuest(msg) {
+          clearTimeout(syncTimer);
           var g = guests.get(seat);
           if (!g || g.conn !== c) return;
           guests.delete(seat);
           if (net) net.remove(seat);
           if (!guests.size) endMatch();
-          setOnline("Player " + seat + " left. The game keeps going, and the seat is open again.");
+          setOnline(msg);
           updatePlayers();
+          c.close();
+        }
+        c.on("close", function () {
+          clearTimeout(helloTimer);
+          var g = guests.get(seat);
+          dropGuest(g && !g.synced
+            ? "Player " + seat + " couldn't finish joining. The seat is open again."
+            : "Player " + seat + " left. The game keeps going, and the seat is open again.");
         });
         c.on("error", function (e) { console.error(e); });
       });
@@ -546,10 +605,18 @@
       if (code.length !== 5) { setOnline("Room codes are 5 characters."); return; }
       ensureStarted().then(function () { joinRoom(code); }, function () {});
     });
+    var joinTimer = null;
     function joinRoom(code) {
       if (peer) peer.destroy();
       role = "guest";
+      welcomed = false;
+      pieces = {};
       setOnline("Joining room " + code + "…");
+      clearTimeout(joinTimer);
+      joinTimer = setTimeout(function () {
+        leaveRoom("Couldn't connect to room " + code + ". One of the networks may be blocking " +
+          "direct connections; try a different network (for example, phone data).");
+      }, 20000);
       peer = new Peer();
       peer.on("open", function () {
         var c = peer.connect(PREFIX + code, { reliable: true });
@@ -559,11 +626,17 @@
           net = makeNet(false);
           showRoom(code);
           setOnline("Connected. Getting the game from the host…");
+          clearTimeout(joinTimer);
+          joinTimer = setTimeout(function () {
+            if (!welcomed) leaveRoom("Connected, but the game didn't arrive from the host. Try joining again.");
+          }, 30000);
+          hostSend({ t: "hello" });
         });
         c.on("data", onHostData);
         c.on("close", function () {
           if (hostConn !== c) return;
-          leaveRoom("The host left the room. Your game keeps going offline.");
+          leaveRoom(welcomed ? "The host left the room. Your game keeps going offline."
+                             : "The host closed the connection before the game arrived. Try joining again.");
         });
         c.on("error", function (e) { console.error(e); });
       });
@@ -571,6 +644,7 @@
     }
 
     function leaveRoom(msg) {
+      clearTimeout(joinTimer);
       var conns = [];
       if (hostConn) conns.push(hostConn);
       guests.forEach(function (g) { conns.push(g.conn); });
