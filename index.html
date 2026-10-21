@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>My NES Game</title>
+  <meta name="description" content="Play my NES game right in your browser — no download needed." />
+  <style>
+    :root {
+      --bg: #14121a;
+      --panel: #1f1c28;
+      --text: #ece8f4;
+      --muted: #a39bb5;
+      --accent: #e2483d;
+      --btn: #2e2a3a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 1.8rem; letter-spacing: .02em; }
+    .tagline { margin: 0 0 20px; color: var(--muted); }
+
+    .screen-wrap { position: relative; width: 100%; max-width: 512px; margin: 0 auto;
+      aspect-ratio: 256 / 240; background: #000; border-radius: 8px; overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+    #nes { width: 100%; height: 100%; }
+    #nes canvas { image-rendering: pixelated; }
+
+    #start { position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px; border: 0; cursor: pointer;
+      background: rgba(0,0,0,.75); color: var(--text); font: inherit; font-size: 1.2rem; }
+    #start .play { width: 72px; height: 72px; border-radius: 50%; background: var(--accent);
+      display: grid; place-items: center; font-size: 2rem; }
+    #status { text-align: center; color: var(--muted); min-height: 1.4em; margin: 10px 0 0; font-size: .9rem; }
+
+    .toolbar { display: flex; gap: 8px; justify-content: center; margin: 14px 0; flex-wrap: wrap; }
+    .toolbar button { background: var(--btn); color: var(--text); border: 0; border-radius: 6px;
+      padding: 8px 14px; font: inherit; cursor: pointer; }
+    .toolbar button:hover { filter: brightness(1.25); }
+
+    /* On-screen gamepad for phones/tablets */
+    #pad { display: none; justify-content: space-between; align-items: center;
+      max-width: 512px; margin: 16px auto 0; user-select: none; -webkit-user-select: none;
+      touch-action: none; }
+    @media (pointer: coarse) { #pad { display: flex; } }
+    .dpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); }
+    .pad-btn { background: var(--btn); color: var(--text); border: 0; border-radius: 10px;
+      font: inherit; font-weight: 700; touch-action: none; }
+    .pad-btn.active { background: var(--accent); }
+    .dpad .up { grid-area: 1 / 2; } .dpad .left { grid-area: 2 / 1; }
+    .dpad .right { grid-area: 2 / 3; } .dpad .down { grid-area: 3 / 2; }
+    .mid { display: flex; flex-direction: column; gap: 10px; }
+    .mid .pad-btn { padding: 8px 10px; font-size: .75rem; border-radius: 20px; }
+    .ab { display: flex; gap: 14px; }
+    .ab .pad-btn { width: 64px; height: 64px; border-radius: 50%; font-size: 1.2rem; }
+
+    .controls { background: var(--panel); border-radius: 8px; padding: 14px 18px; margin-top: 20px; }
+    .controls h2 { font-size: 1rem; margin: 0 0 8px; }
+    .controls table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+    .controls td { padding: 4px 0; }
+    .controls td:last-child { text-align: right; color: var(--muted); }
+    kbd { background: var(--btn); border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+
+    footer { margin-top: 28px; font-size: .8rem; color: var(--muted); text-align: center; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>My NES Game</h1>
+    <p class="tagline">Play it right here in your browser. No download needed.</p>
+
+    <div class="screen-wrap">
+      <div id="nes"></div>
+      <button id="start" aria-label="Start game">
+        <span class="play">▶</span>
+        <span>Click to play</span>
+      </button>
+    </div>
+    <p id="status"></p>
+
+    <div class="toolbar">
+      <button id="btn-pause">Pause</button>
+      <button id="btn-reset">Reset</button>
+      <button id="btn-save">Save state</button>
+      <button id="btn-load">Load state</button>
+      <button id="btn-full">Fullscreen</button>
+    </div>
+
+    <div id="pad" aria-hidden="true">
+      <div class="dpad">
+        <button class="pad-btn up" data-btn="BUTTON_UP">▲</button>
+        <button class="pad-btn left" data-btn="BUTTON_LEFT">◀</button>
+        <button class="pad-btn right" data-btn="BUTTON_RIGHT">▶</button>
+        <button class="pad-btn down" data-btn="BUTTON_DOWN">▼</button>
+      </div>
+      <div class="mid">
+        <button class="pad-btn" data-btn="BUTTON_SELECT">SELECT</button>
+        <button class="pad-btn" data-btn="BUTTON_START">START</button>
+      </div>
+      <div class="ab">
+        <button class="pad-btn" data-btn="BUTTON_B">B</button>
+        <button class="pad-btn" data-btn="BUTTON_A">A</button>
+      </div>
+    </div>
+
+    <section class="controls">
+      <h2>Keyboard controls</h2>
+      <table>
+        <tr><td>Move</td><td><kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd></td></tr>
+        <tr><td>A</td><td><kbd>X</kbd></td></tr>
+        <tr><td>B</td><td><kbd>Z</kbd></td></tr>
+        <tr><td>Start</td><td><kbd>Enter</kbd></td></tr>
+        <tr><td>Select</td><td><kbd>Right Ctrl</kbd></td></tr>
+      </table>
+      <p style="margin:10px 0 0;color:var(--muted);font-size:.9rem">USB and Bluetooth gamepads work too.</p>
+    </section>
+
+    <footer>
+      Emulation by <a href="https://github.com/bfirsh/jsnes">JSNES</a> (Apache-2.0).
+    </footer>
+  </main>
+
+  <!-- JSNES, pinned to a specific version so updates can't break the page -->
+  <script src="https://unpkg.com/jsnes@2.1.0/dist/jsnes.min.js"></script>
+  <script>
+    // ==== CONFIG: change this to your ROM's file name ====
+    var ROM_URL = "game/game.nes";
+    // ======================================================
+
+    var browser = null;
+    var paused = false;
+    var statusEl = document.getElementById("status");
+    var SAVE_KEY = "nes-save:" + ROM_URL;
+
+    function setStatus(msg) { statusEl.textContent = msg || ""; }
+
+    // Browsers block audio until the player interacts with the page,
+    // so the emulator starts from this click.
+    document.getElementById("start").addEventListener("click", function () {
+      var startBtn = this;
+      startBtn.querySelector("span:last-child").textContent = "Loading…";
+      jsnes.Browser.loadROMFromURL(ROM_URL, function (err, data) {
+        if (err) {
+          startBtn.querySelector("span:last-child").textContent = "Couldn't load the game";
+          setStatus("Check that " + ROM_URL + " exists in the repo.");
+          console.error(err);
+          return;
+        }
+        browser = new jsnes.Browser({
+          container: document.getElementById("nes"),
+          romData: data,
+          onError: function (e) { console.error(e); setStatus("Emulator error: " + e.message); }
+        });
+        startBtn.remove();
+        setStatus("");
+      });
+    });
+
+    document.getElementById("btn-pause").addEventListener("click", function () {
+      if (!browser) return;
+      if (paused) { browser.start(); this.textContent = "Pause"; }
+      else { browser.stop(); this.textContent = "Resume"; }
+      paused = !paused;
+    });
+
+    document.getElementById("btn-reset").addEventListener("click", function () {
+      if (browser) browser.nes.reset();
+    });
+
+    document.getElementById("btn-save").addEventListener("click", function () {
+      if (!browser) return;
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify(browser.nes.toJSON()));
+        setStatus("State saved in this browser.");
+      } catch (e) { setStatus("Couldn't save (storage blocked or full)."); }
+    });
+
+    document.getElementById("btn-load").addEventListener("click", function () {
+      if (!browser) return;
+      try {
+        var s = localStorage.getItem(SAVE_KEY);
+        if (!s) { setStatus("No saved state yet."); return; }
+        browser.nes.fromJSON(JSON.parse(s));
+        setStatus("State loaded.");
+      } catch (e) { setStatus("Couldn't load saved state."); }
+    });
+
+    document.getElementById("btn-full").addEventListener("click", function () {
+      var el = document.querySelector(".screen-wrap");
+      (el.requestFullscreen || el.webkitRequestFullscreen || function () {}).call(el);
+    });
+
+    // Touch gamepad
+    document.querySelectorAll("#pad .pad-btn").forEach(function (b) {
+      var btn = jsnes.Controller[b.dataset.btn];
+      function down(e) { e.preventDefault(); b.classList.add("active"); if (browser) browser.nes.buttonDown(1, btn); }
+      function up(e) { e.preventDefault(); b.classList.remove("active"); if (browser) browser.nes.buttonUp(1, btn); }
+      b.addEventListener("pointerdown", down);
+      b.addEventListener("pointerup", up);
+      b.addEventListener("pointercancel", up);
+      b.addEventListener("pointerleave", up);
+    });
+  </script>
+</body>
+</html>
