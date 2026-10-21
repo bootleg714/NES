@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>My NES Game</title>
-  <meta name="description" content="Play my NES game right in your browser — no download needed." />
+  <meta name="description" content="Play my NES game right in your browser, solo or online with a friend. No download needed." />
   <style>
     :root {
       --bg: #14121a;
@@ -12,6 +12,7 @@
       --text: #ece8f4;
       --muted: #a39bb5;
       --accent: #e2483d;
+      --ok: #47c97a;
       --btn: #2e2a3a;
     }
     * { box-sizing: border-box; }
@@ -20,47 +21,81 @@
     main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
     h1 { margin: 0 0 4px; font-size: 1.8rem; letter-spacing: .02em; }
     .tagline { margin: 0 0 20px; color: var(--muted); }
+    button { font: inherit; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: default; }
 
-    .screen-wrap { position: relative; width: 100%; max-width: 512px; margin: 0 auto;
+    /* ---- Screen + touch controls ---- */
+    .stage { display: grid; grid-template-columns: 1fr; grid-template-areas: "screen"; justify-items: center; }
+    .screen-wrap { grid-area: screen; position: relative; width: 100%; max-width: 512px;
       aspect-ratio: 256 / 240; background: #000; border-radius: 8px; overflow: hidden;
       box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+    .screen-wrap:fullscreen { max-width: none; border-radius: 0; }
     #nes { width: 100%; height: 100%; }
     #nes canvas { image-rendering: pixelated; }
 
     #start { position: absolute; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 10px; border: 0; cursor: pointer;
-      background: rgba(0,0,0,.75); color: var(--text); font: inherit; font-size: 1.2rem; }
+      align-items: center; justify-content: center; gap: 10px; border: 0;
+      background: rgba(0,0,0,.75); color: var(--text); font-size: 1.2rem; text-align: center; padding: 12px; }
     #start .play { width: 72px; height: 72px; border-radius: 50%; background: var(--accent);
       display: grid; place-items: center; font-size: 2rem; }
     #status { text-align: center; color: var(--muted); min-height: 1.4em; margin: 10px 0 0; font-size: .9rem; }
 
-    .toolbar { display: flex; gap: 8px; justify-content: center; margin: 14px 0; flex-wrap: wrap; }
-    .toolbar button { background: var(--btn); color: var(--text); border: 0; border-radius: 6px;
-      padding: 8px 14px; font: inherit; cursor: pointer; }
-    .toolbar button:hover { filter: brightness(1.25); }
-
-    /* On-screen gamepad for phones/tablets */
-    #pad { display: none; justify-content: space-between; align-items: center;
-      max-width: 512px; margin: 16px auto 0; user-select: none; -webkit-user-select: none;
-      touch-action: none; }
-    @media (pointer: coarse) { #pad { display: flex; } }
-    .dpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); }
+    .touch { display: none; user-select: none; -webkit-user-select: none; touch-action: none; }
+    .dpad { grid-area: dpad; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); }
+    .mid { grid-area: mid; gap: 10px; justify-content: center; }
+    .ab { grid-area: ab; gap: 14px; align-items: center; }
     .pad-btn { background: var(--btn); color: var(--text); border: 0; border-radius: 10px;
-      font: inherit; font-weight: 700; touch-action: none; }
+      font-weight: 700; touch-action: none; -webkit-tap-highlight-color: transparent; }
     .pad-btn.active { background: var(--accent); }
     .dpad .up { grid-area: 1 / 2; } .dpad .left { grid-area: 2 / 1; }
     .dpad .right { grid-area: 2 / 3; } .dpad .down { grid-area: 3 / 2; }
-    .mid { display: flex; flex-direction: column; gap: 10px; }
-    .mid .pad-btn { padding: 8px 10px; font-size: .75rem; border-radius: 20px; }
-    .ab { display: flex; gap: 14px; }
+    .mid .pad-btn { padding: 8px 12px; font-size: .75rem; border-radius: 20px; }
     .ab .pad-btn { width: 64px; height: 64px; border-radius: 50%; font-size: 1.2rem; }
+    .ab .pad-btn.b { margin-top: 28px; }
 
-    .controls { background: var(--panel); border-radius: 8px; padding: 14px 18px; margin-top: 20px; }
-    .controls h2 { font-size: 1rem; margin: 0 0 8px; }
-    .controls table { border-collapse: collapse; width: 100%; font-size: .95rem; }
-    .controls td { padding: 4px 0; }
-    .controls td:last-child { text-align: right; color: var(--muted); }
+    /* Phones and tablets: show the touch gamepad, hide the keyboard help */
+    @media (pointer: coarse) {
+      .touch { display: grid; }
+      .mid, .ab { display: flex; }
+      .stage { grid-template-columns: 1fr 1fr; row-gap: 16px; column-gap: 8px;
+        grid-template-areas: "screen screen" "dpad ab" "mid mid"; align-items: center; }
+      .dpad { justify-self: start; }
+      .ab { justify-self: end; }
+      .keyboard-help { display: none; }
+    }
+    /* Phones held sideways: controls on either side of the screen */
+    @media (pointer: coarse) and (orientation: landscape) and (max-height: 600px) {
+      main { padding: 8px 12px; max-width: none; }
+      header, footer { display: none; }
+      .stage { grid-template-columns: auto 1fr auto; grid-template-rows: 1fr auto;
+        grid-template-areas: "dpad screen ab" "dpad mid ab"; column-gap: 16px; row-gap: 6px;
+        height: calc(100dvh - 16px); }
+      .screen-wrap { width: auto; height: calc(100dvh - 70px); max-width: none; }
+      .mid { flex-direction: row; }
+      #status { margin: 4px 0 0; }
+    }
+
+    /* ---- Toolbar + panels ---- */
+    .toolbar { display: flex; gap: 8px; justify-content: center; margin: 14px 0; flex-wrap: wrap; }
+    .toolbar button, .panel button { background: var(--btn); color: var(--text); border: 0;
+      border-radius: 6px; padding: 8px 14px; }
+    .toolbar button:not(:disabled):hover, .panel button:not(:disabled):hover { filter: brightness(1.25); }
+    .panel { background: var(--panel); border-radius: 8px; padding: 14px 18px; margin-top: 20px; }
+    .panel h2 { font-size: 1rem; margin: 0 0 10px; }
+    .panel .primary { background: var(--accent); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .or { color: var(--muted); padding: 0 4px; }
+    #join-code { background: var(--bg); color: var(--text); border: 1px solid var(--btn);
+      border-radius: 6px; padding: 8px 10px; font: inherit; width: 8.5em;
+      text-transform: uppercase; letter-spacing: .15em; }
+    .code { font-size: 1.6rem; font-weight: 700; letter-spacing: .2em; color: var(--text); }
+    .hint { color: var(--muted); font-size: .9rem; margin: 10px 0 0; }
+    #online-status.ok { color: var(--ok); }
+    .panel table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+    .panel td { padding: 4px 0; }
+    .panel td:last-child { text-align: right; color: var(--muted); }
     kbd { background: var(--btn); border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+    [hidden] { display: none !important; }
 
     footer { margin-top: 28px; font-size: .8rem; color: var(--muted); text-align: center; }
     footer a { color: var(--muted); }
@@ -68,15 +103,34 @@
 </head>
 <body>
   <main>
-    <h1>My NES Game</h1>
-    <p class="tagline">Play it right here in your browser. No download needed.</p>
+    <header>
+      <h1>My NES Game</h1>
+      <p class="tagline">Play it right here in your browser, solo or online with a friend.</p>
+    </header>
 
-    <div class="screen-wrap">
-      <div id="nes"></div>
-      <button id="start" aria-label="Start game">
-        <span class="play">▶</span>
-        <span>Click to play</span>
-      </button>
+    <div class="stage">
+      <div class="screen-wrap">
+        <div id="nes"></div>
+        <button id="start" aria-label="Start game">
+          <span class="play">▶</span>
+          <span id="start-label">Click to play</span>
+        </button>
+      </div>
+
+      <div class="touch dpad">
+        <button class="pad-btn up" data-btn="BUTTON_UP" aria-label="Up">▲</button>
+        <button class="pad-btn left" data-btn="BUTTON_LEFT" aria-label="Left">◀</button>
+        <button class="pad-btn right" data-btn="BUTTON_RIGHT" aria-label="Right">▶</button>
+        <button class="pad-btn down" data-btn="BUTTON_DOWN" aria-label="Down">▼</button>
+      </div>
+      <div class="touch mid">
+        <button class="pad-btn" data-btn="BUTTON_SELECT">SELECT</button>
+        <button class="pad-btn" data-btn="BUTTON_START">START</button>
+      </div>
+      <div class="touch ab">
+        <button class="pad-btn b" data-btn="BUTTON_B">B</button>
+        <button class="pad-btn" data-btn="BUTTON_A">A</button>
+      </div>
     </div>
     <p id="status"></p>
 
@@ -88,24 +142,30 @@
       <button id="btn-full">Fullscreen</button>
     </div>
 
-    <div id="pad" aria-hidden="true">
-      <div class="dpad">
-        <button class="pad-btn up" data-btn="BUTTON_UP">▲</button>
-        <button class="pad-btn left" data-btn="BUTTON_LEFT">◀</button>
-        <button class="pad-btn right" data-btn="BUTTON_RIGHT">▶</button>
-        <button class="pad-btn down" data-btn="BUTTON_DOWN">▼</button>
+    <section class="panel" id="online">
+      <h2>Play online with a friend</h2>
+      <div id="online-idle" class="row">
+        <button id="btn-host" class="primary">Create room</button>
+        <span class="or">or</span>
+        <form id="join-form" class="row">
+          <input id="join-code" placeholder="CODE" maxlength="5" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" aria-label="Room code" />
+          <button type="submit">Join room</button>
+        </form>
       </div>
-      <div class="mid">
-        <button class="pad-btn" data-btn="BUTTON_SELECT">SELECT</button>
-        <button class="pad-btn" data-btn="BUTTON_START">START</button>
+      <div id="online-room" hidden>
+        <div class="row">
+          <span>Room code:</span> <span class="code" id="room-code"></span>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="btn-copy" class="primary">Copy invite link</button>
+          <button id="btn-leave">Leave room</button>
+        </div>
       </div>
-      <div class="ab">
-        <button class="pad-btn" data-btn="BUTTON_B">B</button>
-        <button class="pad-btn" data-btn="BUTTON_A">A</button>
-      </div>
-    </div>
+      <p id="online-status" class="hint">The person who creates the room is Player 1. The friend who joins is Player 2.</p>
+    </section>
 
-    <section class="controls">
+    <section class="panel keyboard-help">
       <h2>Keyboard controls</h2>
       <table>
         <tr><td>Move</td><td><kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd></td></tr>
@@ -114,70 +174,111 @@
         <tr><td>Start</td><td><kbd>Enter</kbd></td></tr>
         <tr><td>Select</td><td><kbd>Right Ctrl</kbd></td></tr>
       </table>
-      <p style="margin:10px 0 0;color:var(--muted);font-size:.9rem">USB and Bluetooth gamepads work too.</p>
+      <p class="hint">USB and Bluetooth gamepads work too. For two players on one keyboard,
+        Player 2 uses the number pad (8/4/6/2 to move, 7 = A, 9 = B, 1 = Start, 3 = Select).</p>
     </section>
 
     <footer>
       Emulation by <a href="https://github.com/bfirsh/jsnes">JSNES</a> (Apache-2.0).
+      Online rooms by <a href="https://peerjs.com">PeerJS</a>.
     </footer>
   </main>
 
-  <!-- JSNES, pinned to a specific version so updates can't break the page -->
+  <!-- Libraries, pinned to specific versions so updates can't break the page -->
   <script src="https://unpkg.com/jsnes@2.1.0/dist/jsnes.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script src="netplay.js"></script>
   <script>
-    // ==== CONFIG: change this to your ROM's file name ====
-    var ROM_URL = "game/game.nes";
-    // ======================================================
+    // ==== CONFIG ===========================================
+    var ROM_URL = "game/game.nes"; // your ROM's file name
+    var INPUT_DELAY = 5;           // online input delay in frames (raise to 6-8 for long-distance play)
+    // =======================================================
 
-    var browser = null;
+    var $ = function (id) { return document.getElementById(id); };
+    var browser = null, origFrame = null, origDown = null, origUp = null;
     var paused = false;
-    var statusEl = document.getElementById("status");
     var SAVE_KEY = "nes-save:" + ROM_URL;
 
-    function setStatus(msg) { statusEl.textContent = msg || ""; }
+    function setStatus(msg) { $("status").textContent = msg || ""; }
+    function setOnline(msg, ok) {
+      var el = $("online-status");
+      el.textContent = msg;
+      el.className = "hint" + (ok ? " ok" : "");
+    }
 
-    // Browsers block audio until the player interacts with the page,
-    // so the emulator starts from this click.
-    document.getElementById("start").addEventListener("click", function () {
-      var startBtn = this;
-      startBtn.querySelector("span:last-child").textContent = "Loading…";
-      jsnes.Browser.loadROMFromURL(ROM_URL, function (err, data) {
-        if (err) {
-          startBtn.querySelector("span:last-child").textContent = "Couldn't load the game";
-          setStatus("Check that " + ROM_URL + " exists in the repo.");
-          console.error(err);
-          return;
-        }
-        browser = new jsnes.Browser({
-          container: document.getElementById("nes"),
-          romData: data,
-          onError: function (e) { console.error(e); setStatus("Emulator error: " + e.message); }
+    // ---------- Starting the emulator ----------
+    // Browsers block audio until the player interacts, so the game starts on a click.
+    var starting = null;
+    function ensureStarted() {
+      if (browser) return Promise.resolve();
+      if (starting) return starting;
+      $("start-label").textContent = "Loading…";
+      starting = new Promise(function (resolve, reject) {
+        jsnes.Browser.loadROMFromURL(ROM_URL, function (err, data) {
+          if (err) {
+            $("start-label").textContent = "Couldn't load the game";
+            setStatus("Check that " + ROM_URL + " exists in the repo.");
+            starting = null;
+            reject(err);
+            return;
+          }
+          browser = new jsnes.Browser({
+            container: $("nes"),
+            romData: data,
+            onError: function (e) { console.error(e); setStatus("Emulator error: " + e.message); }
+          });
+          hookEmulator();
+          $("start").remove();
+          setStatus("");
+          resolve();
         });
-        startBtn.remove();
-        setStatus("");
       });
+      return starting;
+    }
+
+    // Route every frame and every button press through here, so online play can take over.
+    function hookEmulator() {
+      var nes = browser.nes;
+      origFrame = nes.frame;
+      origDown = nes.buttonDown;
+      origUp = nes.buttonUp;
+      nes.frame = function () {
+        if (net && net.active) net.step();
+        else origFrame();
+      };
+      browser.keyboard.onButtonDown = browser.gamepad.onButtonDown = inputDown;
+      browser.keyboard.onButtonUp = browser.gamepad.onButtonUp = inputUp;
+    }
+    function inputDown(player, btn) {
+      if (net && net.active) net.press(btn, true);
+      else if (origDown) origDown(player, btn);
+    }
+    function inputUp(player, btn) {
+      if (net && net.active) net.press(btn, false);
+      else if (origUp) origUp(player, btn);
+    }
+
+    $("start").addEventListener("click", function () {
+      var code = roomFromUrl();
+      ensureStarted().then(function () { if (code) joinRoom(code); }, function () {});
     });
 
-    document.getElementById("btn-pause").addEventListener("click", function () {
+    // ---------- Toolbar ----------
+    $("btn-pause").addEventListener("click", function () {
       if (!browser) return;
       if (paused) { browser.start(); this.textContent = "Pause"; }
       else { browser.stop(); this.textContent = "Resume"; }
       paused = !paused;
     });
-
-    document.getElementById("btn-reset").addEventListener("click", function () {
-      if (browser) browser.nes.reset();
-    });
-
-    document.getElementById("btn-save").addEventListener("click", function () {
+    $("btn-reset").addEventListener("click", function () { if (browser) browser.nes.reset(); });
+    $("btn-save").addEventListener("click", function () {
       if (!browser) return;
       try {
         localStorage.setItem(SAVE_KEY, JSON.stringify(browser.nes.toJSON()));
         setStatus("State saved in this browser.");
       } catch (e) { setStatus("Couldn't save (storage blocked or full)."); }
     });
-
-    document.getElementById("btn-load").addEventListener("click", function () {
+    $("btn-load").addEventListener("click", function () {
       if (!browser) return;
       try {
         var s = localStorage.getItem(SAVE_KEY);
@@ -186,22 +287,239 @@
         setStatus("State loaded.");
       } catch (e) { setStatus("Couldn't load saved state."); }
     });
-
-    document.getElementById("btn-full").addEventListener("click", function () {
+    $("btn-full").addEventListener("click", function () {
       var el = document.querySelector(".screen-wrap");
-      (el.requestFullscreen || el.webkitRequestFullscreen || function () {}).call(el);
+      var fn = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (fn) fn.call(el); else setStatus("Fullscreen isn't supported in this browser.");
     });
+    // Pause/reset/save/load would put the two players out of step, so they're off during a match.
+    function setMatchMode(on) {
+      ["btn-pause", "btn-reset", "btn-save", "btn-load"].forEach(function (id) { $(id).disabled = on; });
+      if (on && paused) { browser.start(); paused = false; $("btn-pause").textContent = "Pause"; }
+    }
 
-    // Touch gamepad
-    document.querySelectorAll("#pad .pad-btn").forEach(function (b) {
+    // ---------- Touch gamepad ----------
+    document.querySelectorAll(".pad-btn").forEach(function (b) {
       var btn = jsnes.Controller[b.dataset.btn];
-      function down(e) { e.preventDefault(); b.classList.add("active"); if (browser) browser.nes.buttonDown(1, btn); }
-      function up(e) { e.preventDefault(); b.classList.remove("active"); if (browser) browser.nes.buttonUp(1, btn); }
+      var held = false;
+      function down(e) { e.preventDefault(); if (held) return; held = true; b.classList.add("active"); inputDown(1, btn); }
+      function up(e) { e.preventDefault(); if (!held) return; held = false; b.classList.remove("active"); inputUp(1, btn); }
       b.addEventListener("pointerdown", down);
       b.addEventListener("pointerup", up);
       b.addEventListener("pointercancel", up);
       b.addEventListener("pointerleave", up);
+      b.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     });
+    window.addEventListener("resize", function () { if (browser) browser.fitInParent(); });
+
+    // ---------- Online rooms ----------
+    var net = null, peer = null, conn = null, role = null, roomCode = null;
+    // Room IDs include a fingerprint of this page's address so rooms from other sites never collide.
+    var PREFIX = "nesplay-" + (function (s) {
+      var h = 0;
+      for (var i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0;
+      return h.toString(36);
+    })(location.host + location.pathname) + "-";
+    var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+    function newCode() {
+      var c = "";
+      for (var i = 0; i < 5; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+      return c;
+    }
+    function roomFromUrl() {
+      var c = new URLSearchParams(location.search).get("room");
+      return c ? c.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) : null;
+    }
+    function inviteLink() {
+      return location.origin + location.pathname + "?room=" + roomCode;
+    }
+    function showRoom(code) {
+      roomCode = code;
+      $("room-code").textContent = code;
+      $("online-idle").hidden = !!code;
+      $("online-room").hidden = !code;
+    }
+
+    // The snapshot used to fix a desync is ~1 MB, so it's gzipped before sending.
+    function gzip(str) {
+      if (!window.CompressionStream) return Promise.resolve(null);
+      var stream = new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"));
+      return new Response(stream).arrayBuffer();
+    }
+    function gunzip(buf) {
+      var stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+      return new Response(stream).text();
+    }
+    function netSend(m) {
+      if (!conn || !conn.open) return;
+      if (m.t === "s") {
+        var json = JSON.stringify(m.s);
+        gzip(json).then(function (z) {
+          if (!conn || !conn.open) return;
+          if (z) conn.send({ t: "sz", f: m.f, inp: m.inp, z: z });
+          else conn.send({ t: "sj", f: m.f, inp: m.inp, j: json });
+        });
+      } else {
+        conn.send(m);
+      }
+    }
+    // Process incoming messages strictly in order, even when one needs unzipping.
+    var inbox = Promise.resolve();
+    function onData(m) {
+      inbox = inbox.then(function () {
+        if (!m || typeof m !== "object") return;
+        if (m.t === "full") { leaveRoom("That room already has two players."); return; }
+        if (m.t === "sz") {
+          return gunzip(m.z).then(function (txt) {
+            if (net) net.onMessage({ t: "s", f: m.f, inp: m.inp, s: JSON.parse(txt) });
+          });
+        }
+        if (m.t === "sj") { if (net) net.onMessage({ t: "s", f: m.f, inp: m.inp, s: JSON.parse(m.j) }); return; }
+        if (m.t === "start") {
+          setMatchMode(true);
+          setOnline("Connected! You're Player 2. The game restarted for both of you.", true);
+        }
+        if (net) net.onMessage(m);
+      }).catch(function (e) { console.error(e); });
+    }
+
+    function makeNet(isHost) {
+      return createLockstep({
+        nes: browser.nes,
+        runFrame: origFrame,
+        isHost: isHost,
+        delay: INPUT_DELAY,
+        send: netSend,
+        onDesync: function (n) { console.warn("Desync detected, resyncing (" + n + ")"); }
+      });
+    }
+    function endMatch() {
+      if (net) net.end();
+      net = null;
+      setMatchMode(false);
+    }
+
+    function peerError(err) {
+      console.warn(err);
+      var t = err && err.type;
+      if (t === "unavailable-id" && role === "host") { startPeerHost(); return; } // code taken, try another
+      if (t === "peer-unavailable") leaveRoom("No room found with that code. Check it and try again.");
+      else if (t === "network" || t === "server-error" || t === "socket-error" || t === "socket-closed")
+        leaveRoom("Couldn't reach the matchmaking server. Check your connection and try again.");
+      else if (t === "browser-incompatible") leaveRoom("This browser doesn't support online play.");
+      else leaveRoom("Online play error: " + (err && err.message ? err.message : t));
+    }
+
+    // Host: create a room and wait for Player 2.
+    $("btn-host").addEventListener("click", function () {
+      ensureStarted().then(function () {
+        role = "host";
+        startPeerHost();
+      }, function () {});
+    });
+    function startPeerHost() {
+      if (peer) peer.destroy();
+      var code = newCode();
+      setOnline("Creating room…");
+      peer = new Peer(PREFIX + code);
+      peer.on("open", function () {
+        showRoom(code);
+        setOnline("Waiting for Player 2. Send them the invite link or the code.");
+      });
+      peer.on("connection", function (c) {
+        if (conn) {
+          c.on("open", function () { c.send({ t: "full" }); setTimeout(function () { c.close(); }, 500); });
+          return;
+        }
+        conn = c;
+        c.on("open", function () {
+          net = makeNet(true);
+          net.begin();
+          setMatchMode(true);
+          setOnline("Player 2 joined! You're Player 1. The game restarted for both of you.", true);
+        });
+        c.on("data", onData);
+        c.on("close", function () {
+          if (conn !== c) return;
+          conn = null;
+          endMatch();
+          setOnline("Player 2 left. Your game keeps going. The room is still open if they want to rejoin.");
+        });
+        c.on("error", function (e) { console.error(e); });
+      });
+      peer.on("error", peerError);
+      peer.on("disconnected", function () { if (peer && !peer.destroyed) peer.reconnect(); });
+    }
+
+    // Guest: join a room by code.
+    $("join-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var code = $("join-code").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (code.length !== 5) { setOnline("Room codes are 5 characters."); return; }
+      ensureStarted().then(function () { joinRoom(code); }, function () {});
+    });
+    function joinRoom(code) {
+      if (peer) peer.destroy();
+      role = "guest";
+      setOnline("Joining room " + code + "…");
+      peer = new Peer();
+      peer.on("open", function () {
+        var c = peer.connect(PREFIX + code, { reliable: true });
+        conn = c;
+        c.on("open", function () {
+          showRoom(code);
+          net = makeNet(false);
+          setOnline("Connected. Waiting for the host to start…");
+        });
+        c.on("data", onData);
+        c.on("close", function () {
+          if (conn !== c) return;
+          leaveRoom("The host left the room. Your game keeps going offline.");
+        });
+        c.on("error", function (e) { console.error(e); });
+      });
+      peer.on("error", peerError);
+    }
+
+    function leaveRoom(msg) {
+      var c = conn;
+      conn = null;
+      endMatch();
+      if (c) c.close();
+      if (peer) { peer.destroy(); peer = null; }
+      role = null;
+      showRoom(null);
+      setOnline(msg || "You left the room.");
+      if (roomFromUrl()) history.replaceState(null, "", location.pathname);
+    }
+    $("btn-leave").addEventListener("click", function () { leaveRoom(); });
+
+    $("btn-copy").addEventListener("click", function () {
+      var link = inviteLink();
+      var done = function () { setOnline("Invite link copied. Send it to your friend!", true); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(done, function () { window.prompt("Copy this link:", link); });
+      } else {
+        window.prompt("Copy this link:", link);
+      }
+    });
+
+    // Let players know when the game is waiting on the other side's connection.
+    setInterval(function () {
+      if (net && net.active && net.stalled > 30) setStatus("Waiting for the other player's connection…");
+      else if ($("status").textContent.indexOf("Waiting for the other") === 0) setStatus("");
+    }, 500);
+
+    // Opened from an invite link: show it on the play button.
+    (function () {
+      var code = roomFromUrl();
+      if (code) {
+        $("join-code").value = code;
+        $("start-label").textContent = "Click to join room " + code;
+      }
+    })();
+    window.addEventListener("beforeunload", function () { if (peer) peer.destroy(); });
   </script>
 </body>
 </html>
